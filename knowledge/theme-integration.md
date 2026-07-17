@@ -5,7 +5,7 @@ when the cart logic is right. All required.
 
 ## 1. Custom-element root + JS-wired events (no framework-magic markup)
 
-If the progress bar / tier manager is a custom element (e.g.
+If the progress bar / gift manager is a custom element (e.g.
 `<gwp-progress-bar>`), the component's **root rendered element MUST be that tag** —
 never a `<div>` that wraps or omits it. A `<div>` root means
 `customElements.define('gwp-progress-bar', …)` never attaches, `connectedCallback`
@@ -45,12 +45,84 @@ passes:
 
 ## 4. Cross-component shared state
 
-The progress bar (cart), the tier manager, and the optional PDP message live in
+The progress bar (cart), the gift manager, and the optional PDP message live in
 different places. Share the computed "next" message / cart total through a
 **page-level singleton or the theme's cart-update events** — don't try to read one
 component's internals from another. Re-read/re-init after Section Rendering morphs.
 
-## 5. Load assets only where used; never edit template JSON
+## 5. Horizon-specific: Use CartLinesUpdateEvent + sectionRenderer for cart sync
+
+**This is a confirmed production fix — do NOT revert to fetch patching on Horizon.**
+
+Horizon does not fire a generic `cart:update` event. It dispatches `CartLinesUpdateEvent`
+from `@shopify/events` (`StandardEvents.cartLinesUpdate` is the event name) **before** it
+morphs the cart section. Each event carries a `promise` that resolves after the morph
+completes.
+
+### How to listen
+
+```js
+import { StandardEvents } from '@shopify/events';
+document.addEventListener(StandardEvents.cartLinesUpdate, (event) => {
+  // Wait for Horizon's morph to settle, then evaluate
+  event.promise?.then(() => evaluateGift()).catch(() => {});
+});
+```
+
+### Why fetch patching doesn't work on Horizon
+
+Horizon sends cart mutations with a `sections` parameter and morphs the DOM using
+`morphSection()` — all in one request. By the time a patched `window.fetch` sees the
+response, Horizon has already morphed the section with HTML that does NOT include the
+gift (the gift was added AFTER that request). No further re-render is triggered, so the
+gift exists in Shopify's cart but the drawer never shows it.
+
+### Re-render after mutation (REQUIRED)
+
+After `_addGift()` / `_removeGift()` / `_setGiftQty()`, call `sectionRenderer` to
+re-render the cart section:
+
+```js
+import { sectionRenderer } from '@theme/section-renderer';
+
+// In gwp.js (loaded as type="module" so imports work):
+async function rerenderCartSections() {
+  const sections = new Map();
+  document.querySelectorAll('cart-items-component[data-section-id]').forEach((el) => {
+    const id = el.dataset.sectionId;
+    if (!sections.has(id)) sections.set(id, { isDrawer: 'drawer' in el.dataset });
+  });
+  await Promise.all(
+    [...sections.entries()].map(([id, { isDrawer }]) =>
+      sectionRenderer
+        .renderSection(id, { cache: false, mode: isDrawer ? 'hydration' : 'full' })
+        .catch(() => {})
+    )
+  );
+}
+```
+
+Use `mode: 'hydration'` for the drawer (preserves open state) and `mode: 'full'` for
+the cart page. Both aliases are in the importmap:
+```
+"@shopify/events":       "https://cdn.shopify.com/storefront/standard-events.js"
+"@theme/section-renderer": "{{ 'section-renderer.js' | asset_url }}"
+```
+
+### Loading feedback
+
+While the GWP mutation + re-render is in flight, show a loading state:
+
+```js
+// Pulse animation on the bar (add [data-processing] attr + CSS keyframes)
+this.toggleAttribute('data-processing', active);
+// Disable cart interactions (Horizon's own mechanism)
+document.querySelectorAll('cart-items-component').forEach(el =>
+  el.classList.toggle('cart-items-disabled', active)
+);
+```
+
+## 6. Load assets only where used; never edit template JSON
 
 Reference `gwp.js` / `gwp.css` from inside the cart (and optional PDP) snippets so
 they load only there — never from global `layout/theme.liquid`. Never modify the

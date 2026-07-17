@@ -21,11 +21,21 @@ this is a top reported failure (gift only adds/removes after refresh). The gift
 manager must:
 
 - run **once on load** (returning shopper already over threshold), AND
-- re-evaluate after **every** cart change. Subscribe to the theme's cart-update event
-  (`cart:update` or equivalent) — and because native quantity steppers and other apps
-  mutate the cart *without* firing that event, **also intercept cart writes**: wrap
-  `window.fetch` (and `XMLHttpRequest`) and re-evaluate after any successful POST to
-  `/cart/add`, `/cart/change`, `/cart/update`, or `/cart/clear`.
+- re-evaluate after **every** cart change. Subscribe to the theme's native cart-update
+  event. For Horizon, this is **`StandardEvents.cartLinesUpdate`** from `@shopify/events`
+  — NOT `cart:update` (Horizon does not fire that). Wait for `event.promise` to resolve
+  (morph is complete) before evaluating.
+
+> **Horizon warning — do NOT intercept window.fetch:** Horizon morphs the cart section
+> inside the same `/cart/change.js` request using a `sections` param. By the time a
+> patched fetch handler fires, Horizon has already morphed the DOM without the gift.
+> A subsequent re-render is REQUIRED (see theme-integration.md §5). Use the event above
+> instead of fetch patching.
+
+For non-Horizon OS 2.0 themes that do not dispatch a native event, intercepting
+`window.fetch` / `XMLHttpRequest` for `/cart/add|change|update|clear` POSTs is an
+acceptable fallback — but always follow the mutation with a re-render or dispatch
+of the theme's own cart-update event so the DOM reflects the new gift line.
 
 Never gate the reconcile behind the progress bar — it runs even if the bar isn't
 visible.

@@ -57,7 +57,7 @@ analyzer, dev, and validator agents.
   | `progress-and-config.md` | progress bar, messaging, customizer settings |
   | `free-gift-enforcement.md` | how the gift becomes free ($0 product or automatic discount) |
   | `theme-integration.md` | OS 2.0 blocks, JS wiring, cross-component state, push-valid schema |
-  | `gotchas.md` | the 12 traps |
+  | `gotchas.md` | the 13 traps |
 - **Tools** (`tools.ts`): Shopify Dev MCP for build-time cart/variant lookups.
 - No `storeSettings`, no `sdk` — native build, no external service.
 

@@ -76,6 +76,26 @@ structure. In Horizon the actual row HTML — including `data-key`, `quantity-se
 and `button.cart-items__remove` — is in `snippets/cart-products.liquid`. The plan must
 name `snippets/cart-products.liquid` as the file read, not the block wrapper.
 
+## 13. Gift added to cart but never appears in drawer — re-render was skipped (Horizon, reported)
+
+The gift was added to Shopify's cart (`/cart/add.js` returned 200 OK, cart has the gift
+line) but the cart drawer shows no gift row and the quantity stepper / remove button are
+still visible.
+
+**Root cause:** Horizon morphs the cart section inside the same `/cart/change.js`
+request (via the `sections` param). The HTML fetched for that morph does not include the
+gift (which hadn't been added yet). Once Horizon morphs the DOM, no further re-render
+fires — so the gift exists in Shopify's backend but not in the page DOM.
+
+**Fix:** After `_addGift()` / `_removeGift()`, call
+`sectionRenderer.renderSection(sectionId, { cache: false, mode: 'hydration' })` from
+`@theme/section-renderer` so the drawer re-renders with the updated cart HTML. This is
+the REQUIRED last step of every GWP mutation on Horizon. See theme-integration.md §5.
+
+**Also:** Horizon does NOT dispatch `cart:update`. Listen to
+`StandardEvents.cartLinesUpdate` from `@shopify/events` and wait for `event.promise`
+to resolve before evaluating. Using `cart:update` means reconcile never fires live.
+
 ## 11. Gift line locking uses guessed selectors — silent failure (reported)
 
 If `_lockGiftLines()` and the `[data-is-gwp='true']` CSS rules use generic class names
