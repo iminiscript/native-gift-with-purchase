@@ -64,6 +64,18 @@ Check: `enable_gwp` is off (defaults false); a **product** id was passed instead
 **variant** id; the reconcile isn't wired (gotcha 2); or the gift variant is
 unavailable (cart-mechanics.md).
 
+## 12. Cart row block file is a thin wrapper — selectors still guessed (Horizon-specific)
+
+In Horizon, `blocks/_cart-products.liquid` contains only `{% render 'cart-products' %}`.
+If the Analyzer reads only the block file and stops there, it finds no HTML and no
+selectors — and the Dev falls back to guessing anyway, defeating the purpose of the
+required read.
+
+**Fix:** Follow every `{% render '...' %}` call encountered when looking for cart row
+structure. In Horizon the actual row HTML — including `data-key`, `quantity-selector`,
+and `button.cart-items__remove` — is in `snippets/cart-products.liquid`. The plan must
+name `snippets/cart-products.liquid` as the file read, not the block wrapper.
+
 ## 11. Gift line locking uses guessed selectors — silent failure (reported)
 
 If `_lockGiftLines()` and the `[data-is-gwp='true']` CSS rules use generic class names

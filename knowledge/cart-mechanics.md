@@ -68,9 +68,14 @@ the gift line renders with live controls the shopper can use.
 **Before writing any `_lockGiftLines` JS or `[data-is-gwp]` CSS:**
 
 1. **Find and READ the theme's cart line-item template.** Common locations:
-   - Horizon: `blocks/_cart-products.liquid`
+   - Horizon: `blocks/_cart-products.liquid` — **WARNING: this file is a thin wrapper
+     that just contains `{% render 'cart-products' %}`**. Follow the render call and
+     read `snippets/cart-products.liquid` instead — that is where the actual row
+     structure lives.
    - Dawn: `snippets/cart-items.liquid`
    - Other themes: grep for `cart-item` or `line_item` in `snippets/` and `blocks/`
+   - **General rule:** if the block/snippet you open contains only a `{% render '...' %}`
+     call with no HTML, follow it. The real structure is always one level deeper.
 
 2. **From that file, identify and record:**
    - The **data attribute on the row wrapper element** (e.g. `data-line-item-key`,
