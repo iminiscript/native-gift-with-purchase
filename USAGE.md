@@ -1,15 +1,16 @@
 # native-gift-with-purchase — usage & manual steps
 
-Theme Factory builds a native, no-app gift-with-purchase: a tiered cart progress bar
-and automatic add/remove of a configured gift when a spend threshold is met. TF builds
-the theme code — the merchant configures the thresholds/gift and makes the gift free.
+Theme Factory builds a native, no-app gift-with-purchase: a cart progress bar and
+automatic add/remove of ONE configured gift when a single spend threshold is met (no
+tiers). TF builds the theme code — the merchant configures the threshold/gift and makes
+the gift free.
 
 ## What TF does (automatic)
 
 | What | How |
 |---|---|
-| Progress bar | Tiered meter in cart drawer + cart page (optional PDP message) |
-| Auto-add gift | Single `/cart/add.js` with `_isGWP:"true"` + `_gwp_tier` when the threshold is met (bundled into the triggering add when possible) |
+| Progress bar | Single progress meter in cart drawer + cart page (optional PDP message) |
+| Auto-add gift | Single `/cart/add.js` with `_isGWP:"true"` when the threshold is met (bundled into the triggering add when possible) |
 | Auto-remove | `/cart/change.js` qty 0 when the subtotal drops below the threshold |
 | Keep qty 1 / re-add | Fixes tampered quantity; re-adds if deleted while eligible |
 | Anti-loop reconcile | Mutation lock + state memoization + transient-zero handling |
@@ -19,7 +20,7 @@ the theme code — the merchant configures the thresholds/gift and makes the gif
 
 | Task | Where | Notes |
 |---|---|---|
-| Choose the gift + thresholds | Theme editor | Set `gwp_product`, thresholds, labels, trigger tier, messages |
+| Choose the gift + threshold | Theme editor | Set `gwp_product`, the threshold, messages, and styling |
 | **Make the gift free** | Shopify admin | **Required** — either set the gift to a **$0** price, OR create a Shopify **automatic discount** that makes it free when in the cart. Otherwise checkout charges for it. |
 | Enable the feature | Theme editor | `enable_gwp` (+ `enable_gwp_pdp` for the PDP message) |
 
@@ -34,7 +35,7 @@ the theme code — the merchant configures the thresholds/gift and makes the gif
 
 ## After TF delivers
 
-1. Set the gift product, thresholds, labels, trigger tier, and messages in the editor.
+1. Set the gift product, the threshold, messages, and styling in the editor.
 2. Make the gift free (A or B) and verify with a test cart that crossing the threshold
    adds a **free** gift and dropping below removes it.
 3. QA the checklist.
@@ -55,6 +56,7 @@ the theme code — the merchant configures the thresholds/gift and makes the gif
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Gift never adds when threshold met | Only the visual bar built, or `enable_gwp` off, or a product id (not variant id) passed to add, or reconcile not run on load/cart events | See gotcha 14 — build the gift manager, enable it, pass the variant id, run the reconcile |
 | Cart thrashes / spins | Missing lock or memoization | Add the anti-loop guard (cart-mechanics.md) |
 | Gift never removed / bar stuck | Threshold on raw total incl. gift price | Compute on non-gift subtotal |
 | Gift charged at checkout | No $0 price and no automatic discount | Enable enforcement A or B |

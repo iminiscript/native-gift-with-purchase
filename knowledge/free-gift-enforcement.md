@@ -26,7 +26,7 @@ makes it free when it's in the cart (e.g. "buy X, get Y free" / amount-off the g
 
 ## What the build must do (either option)
 
-- Emit the `_isGWP` / `_gwp_tier` contract so the gift is identifiable and manageable.
+- Emit the `_isGWP` contract so the gift is identifiable and manageable.
 - Compute thresholds on the non-gift subtotal in cents.
 - Surface — in USAGE.md and ideally the section help text — that the merchant must set
   the gift up as **$0 OR** back it with an **automatic discount**, or the "free gift"
