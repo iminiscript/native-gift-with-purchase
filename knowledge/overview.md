@@ -9,76 +9,78 @@ Ajax API. If the theme is not OS 2.0, flag a blocking mismatch.
 
 ## Tasks stay simple — this plugin owns the "how"
 
-A task should only ask, in plain merchant language, for a gift-with-purchase / free
-gift / cart progress bar — e.g. *"add a free gift when the cart reaches $100, with a
-progress bar in the cart."* It should NOT specify the mechanics. **This plugin fully
-specifies the native behavior**: auto-add/remove, the `_isGWP` line-item contract, the
-anti-loop reconcile, threshold math, and how the gift becomes free. Produce that
-behavior whether or not the task mentions it.
+A task can be a one-liner — even just *"Create a GWP progress bar for the cart."* It
+should NOT specify any mechanics, setting names, or thresholds. **This plugin fully
+specifies the native behavior** and **everything else comes from here**: the settings
+to expose, auto-add/remove, the `_isGWP` line-item contract, the anti-loop reconcile,
+threshold math, message building, appearance, and how the gift becomes free. Build the
+complete, generic feature from a minimal prompt.
+
+A prompt that only says "progress bar" STILL requires the full auto-add/remove of the
+gift — the bar without the gift-add is incomplete and broken. This is a **generic,
+theme-agnostic** feature — do not tailor it to any one theme's runtime, helper library,
+or naming. Use standard Shopify primitives only (the cart
+Ajax API, `Shopify.routes.root`, standard cart-update events, plain custom elements)
+so it drops into any OS 2.0 theme.
 
 ## Directive — REQUIRED
 
-This store offers a **native, no-app gift-with-purchase**: when the cart subtotal
-crosses a configured spend threshold, a **configured gift product is automatically
-added to the cart** as a line marked with the `_isGWP` property; a **tiered progress
-bar** ("spend $X more for a free Y") shows in the cart drawer/page (and optionally as
-a PDP message); the gift's quantity is held at **1**; and the gift is **removed** if
-the cart drops back below the threshold.
+> **The defining behavior is AUTO-ADDING THE FREE GIFT to the cart when the threshold
+> is met (and removing it below).** The progress bar is only the visual accompaniment.
+> A build that renders the bar but does not actually add the gift to the cart is
+> INCOMPLETE and must fail validation. Even a prompt that says only "create a progress
+> bar" REQUIRES the full auto-add/remove behavior — they are one feature, never a
+> visual-only meter.
+
+A gift-with-purchase progress bar is a common, theme-agnostic cart pattern. When the
+cart subtotal crosses a single configured spend threshold, ONE **configured gift
+product is automatically added to the cart** as a line marked with the `_isGWP`
+property; a **progress bar** ("You're $X away from your free gift") shows in the cart
+drawer/page (and optionally as a PDP message); the gift's quantity is held at **1**;
+and the gift is **removed** if the cart drops back below the threshold. There is
+exactly ONE gift and ONE threshold — no tiers, no tiered discounts. Build it generic —
+no assumptions about the host theme beyond standard OS 2.0 + the cart Ajax API.
 
 There is **NO gift/rewards app**. The theme only **adds/removes the gift line and
 renders progress**. Making the gift actually **free** is the merchant's setup — a **$0
 product/variant** or a **Shopify automatic "free gift" discount** — the theme NEVER
 manipulates price (free-gift-enforcement.md).
 
-## If the task shows a GWP / progress bar, the plan + acceptance criteria MUST require
+## The build MUST deliver (each rule is detailed in the linked file — don't restate it)
 
-1. a **tiered progress bar** (up to 5 thresholds + a $0 start) rendered in the cart
-   drawer AND cart page, driven by the cart subtotal, with thresholds/labels/messages
-   from **theme settings** (progress-and-config.md); optional PDP mirror message.
-2. **auto-add** the configured gift via a single `/cart/add.js` carrying
-   `properties: { _isGWP: "true", _gwp_tier: "<n>" }` when the trigger threshold is
-   met; when the shopper's add is what crosses the threshold, **bundle the gift into
-   that same add request** (cart-mechanics.md).
-3. **auto-remove** the gift (`/cart/change.js` line → quantity 0) when the subtotal
-   drops below the threshold; **re-add** it if the shopper deletes it while still
-   eligible; **fix quantity to 1** if tampered (cart-mechanics.md).
-4. an **anti-loop guard** — a mutation **lock** plus **state memoization**
-   (`{ meets, has, qty, total }`), and **transient-zero** handling — so reconciling
-   the gift (which itself changes the cart) never loops (cart-mechanics.md). **#1
-   correctness criterion.**
-5. the **trigger threshold computed on the NON-gift subtotal** (exclude `_isGWP`
-   lines and any $0 gift), in **integer cents** (cart-mechanics.md).
-6. the gift identified by **variant id + `_isGWP`** so a shopper's own manual add of
-   the same product is never auto-managed (cart-mechanics.md).
-7. a documented **free-gift enforcement** path — $0 product OR merchant automatic
-   discount — and the build must **not** try to zero the price in theme code
-   (free-gift-enforcement.md).
-8. progress + success **messaging** with `{{ amount_away }}` / `{{ next_tier }}`
-   placeholders, and graceful transient-state handling (progress-and-config.md).
-9. OS 2.0 correctness — the progress bar is an **addable block/section** with a
-   **custom-element root**, all interaction **wired in JS**, cross-component state via
-   a **page-level singleton or cart events**, and **push-valid `{% schema %}`**
-   (theme-integration.md). The theme must PUSH with zero file errors.
-10. assets loaded **only where used** (cart + optional PDP), never global; **never
-    edit volatile `templates/*.json`**.
-11. **error handling + diagnostics** — surface cart-mutation failures; log `[GWP]`
-    warnings for config/shape problems.
-12. **everything merchant-configurable from the theme editor** — the gift product
-    (schema product picker), thresholds/labels/messages, a **master on/off toggle**
-    (`enable_gwp` hides the whole feature), AND the **full appearance set** (title,
-    background, track/fill/marker colours, bar height, corner radius, font sizes,
-    padding) applied via CSS custom properties from settings. Nothing hardcoded; range
-    settings carry `min/max/step/unit/default` and colours a `default`
-    (progress-and-config.md, theme-integration.md).
+1. **[#1]** auto-add the ONE gift when the threshold is met and remove it below —
+   **live via Ajax on every cart change, no refresh** (on load AND after any `/cart/*`
+   mutation). A visual-only bar that doesn't move the gift fails (cart-mechanics.md).
+2. the gift quantity is **always exactly 1** — never multiplies with other line
+   quantities; add only when absent (cart-mechanics.md).
+3. the gift line renders **locked** — no quantity control, no remove button; lock
+   selectors sourced from the actual cart row template (Analyzer MUST read it and name
+   it in the plan — generic guesses silently fail) (cart-mechanics.md).
+4. **anti-loop guard** — mutation lock + state memoization + transient-zero handling,
+   so the reconcile can't loop (cart-mechanics.md).
+5. threshold on the **non-gift subtotal in cents**; gift identified by **variant id +
+   `_isGWP`** so a manual same-product add is untouched (cart-mechanics.md).
+6. a **progress bar** in the cart drawer + page (optional PDP mirror); message built by
+   **concatenation** (prefix + JS amount + suffix), **no `{{ }}` tokens** in settings
+   (progress-and-config.md).
+7. **free-gift enforcement** is the merchant's ($0 product or automatic discount); the
+   theme never zeroes the price (free-gift-enforcement.md).
+8. **OS 2.0 correctness** — addable block/section with a **custom-element root**,
+   JS-wired, **push-valid `{% schema %}`**; the theme PUSHES with zero errors
+   (theme-integration.md).
+9. **everything merchant-configurable** — gift product, threshold, messages, a master
+   **on/off** toggle, and the **full appearance set** via CSS custom properties;
+   nothing hardcoded; assets loaded only where used, no template-JSON edits
+   (progress-and-config.md, theme-integration.md).
 
 ## Where the code lives — stable theme code only
 
 Follow [[plugins-avoid-template-json]] — stable code only, at most a net-new template.
 
 ```
-snippets/gwp-progress-bar.liquid     the tiered progress bar (rendered in cart drawer + cart page)
+snippets/gwp-progress-bar.liquid     the progress bar (rendered in cart drawer + cart page)
 snippets/gwp-pdp-message.liquid      OPTIONAL PDP "spend $X for a free gift" message
-assets/gwp.js                        progress paint + tier manager (auto add/remove, lock+memo reconcile)
+assets/gwp.js                        progress paint + gift manager (auto add/remove, lock+memo reconcile)
 assets/gwp.css                       neutral base styling (restyled by theme tokens)
 (config)                             GWP settings added to the theme's settings_schema group
 ```
@@ -89,10 +91,11 @@ global `layout/theme.liquid`.
 
 ## Scope
 
-- **In scope:** native auto-add/remove gift on a spend threshold, tiered progress
-  bar, PDP message, quantity lock to 1, reconcile guard.
-- **Out of scope:** third-party gift/upsell/rewards apps (Rebuy, etc.); authoring the
-  Shopify automatic discount itself; loyalty programs; the build-your-own-bundle
+- **In scope:** native auto-add/remove of ONE gift on a single spend threshold,
+  progress bar, PDP message, quantity lock to 1, reconcile guard.
+- **Out of scope:** multi-tier thresholds or tiered discounts (this is strictly ONE
+  gift + ONE threshold); third-party gift/upsell/rewards apps (Rebuy, etc.); authoring
+  the Shopify automatic discount itself; loyalty programs; the build-your-own-bundle
   builder (that's `native-bundle-builder`); editing volatile template JSON.
 
 ## Reference

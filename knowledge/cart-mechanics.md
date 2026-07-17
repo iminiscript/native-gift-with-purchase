@@ -1,93 +1,130 @@
-# Cart mechanics — the `_isGWP` contract + the anti-loop reconcile (get this right)
+# Cart mechanics — the `_isGWP` contract, LIVE reconcile, and anti-loop guard
 
-This is the load-bearing part. The reconcile mutates the cart (adds/removes the gift),
-which fires another cart update — **without the guard below it infinite-loops.**
+Scope: **ONE free gift, ONE threshold.** This is the load-bearing part.
 
-## The gift line-item property contract
+## The gift marker
 
-The auto-added gift line carries:
+The auto-added gift line carries one property: **`_isGWP: "true"`** (detection also
+accepts `true`, `1`, `"1"`). The managed gift is identified by **variant id AND
+`_isGWP`** — a shopper's own manual add of the same product is never touched.
 
-| Property | Value | Role |
-|---|---|---|
-| `_isGWP` | `"true"` | marks the line as a system-managed gift. Detection accepts `"true"`, `true`, `1`, `"1"`. |
-| `_gwp_tier` | `"<n>"` | which tier/threshold added it (string), for multi-tier setups. |
+## Resolve the gift VARIANT id
 
-- Leading underscore = hidden line-item property. Keep it.
-- The gift is identified by **variant id AND `_isGWP`** — so a shopper's own manual
-  add of the same product is NOT treated as the managed gift and is never auto-removed.
+`/cart/add.js` needs a **variant id**, not a product id:
+`{{ settings.gwp_product.selected_or_first_available_variant.id }}`. Passing the
+product id makes the add silently fail.
 
-## Auto-add
+## Reconcile LIVE on every cart change — not just page load (CRITICAL)
 
-When the trigger threshold is met and no managed gift is present, add it in one call:
+The reconcile must run **immediately on any cart mutation, with NO page reload** —
+this is a top reported failure (gift only adds/removes after refresh). The gift
+manager must:
+
+- run **once on load** (returning shopper already over threshold), AND
+- re-evaluate after **every** cart change. Subscribe to the theme's cart-update event
+  (`cart:update` or equivalent) — and because native quantity steppers and other apps
+  mutate the cart *without* firing that event, **also intercept cart writes**: wrap
+  `window.fetch` (and `XMLHttpRequest`) and re-evaluate after any successful POST to
+  `/cart/add`, `/cart/change`, `/cart/update`, or `/cart/clear`.
+
+Never gate the reconcile behind the progress bar — it runs even if the bar isn't
+visible.
+
+## Auto-add — quantity ALWAYS 1, add ONLY when absent
 
 ```js
-await fetch(`${Shopify.routes.root}cart/add.js`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", Accept: "application/json" },
-  body: JSON.stringify({
-    items: [{ id: giftVariantId, quantity: 1,
-              properties: { _isGWP: "true", _gwp_tier: String(tier) } }],
-    sections: cartSectionsToRender,   // morph the drawer in the same round-trip
-  }),
-});
+// only when meets && !has:
+items: [{ id: giftVariantId, quantity: 1, properties: { _isGWP: "true" } }]
 ```
 
-**Bundle into the triggering add.** When the shopper's own add-to-cart is what pushes
-the subtotal over the threshold, append the gift item to **that** `/cart/add.js`
-`items` array instead of firing a second request — fewer round-trips, no flicker.
+- The gift quantity is **hardcoded 1** — NEVER derived from another line's quantity or
+  from how many times an event fired. (Raising Product A to qty 5 must add **one**
+  gift, not five.)
+- The add is **idempotent**: guard on `!has` plus the lock + memo below, so repeated
+  cart events can't stack multiple gift lines.
+- When the shopper's own add is what crosses the threshold, bundle the gift into that
+  same `/cart/add.js`.
 
 ## Auto-remove / fix quantity
 
-- **Remove** when the subtotal drops below the threshold: `/cart/change.js` with the
-  gift's 1-based `line` and `quantity: 0` (or `/cart/update.js` by line/id).
-- **Fix quantity** to 1 if the shopper changed it (`meets && has && qty !== 1`).
-- **Re-add** if the shopper deletes the gift while still eligible (next evaluate sees
-  `has === false && meets === true`).
+- Remove when the subtotal drops below the threshold: `/cart/change.js` line →
+  `quantity: 0` (or `/cart/update.js`).
+- If the gift quantity is ever ≠ 1, force it back to 1.
+- Re-add if the shopper somehow removes it while still eligible.
 
-## The reconcile — and the anti-loop guard (REQUIRED)
+## Render the gift line as LOCKED — no quantity control, no remove
 
-Evaluate on every cart change:
+In the cart drawer AND cart page, a line with `_isGWP` renders **read-only**: **hide
+its quantity stepper and its remove/delete icon** (a "Free gift" badge is nice). The
+shopper cannot change or delete the gift — the system owns it. Only `_isGWP` lines are
+locked; normal lines keep their controls.
+
+### REQUIRED — Read the cart row template before writing any lock selector
+
+This is a mandatory step for **both** the Analyzer (planning) and Dev (implementing).
+Guessing selectors is a silent failure — no error is thrown, `theme check` passes, but
+the gift line renders with live controls the shopper can use.
+
+**Before writing any `_lockGiftLines` JS or `[data-is-gwp]` CSS:**
+
+1. **Find and READ the theme's cart line-item template.** Common locations:
+   - Horizon: `blocks/_cart-products.liquid`
+   - Dawn: `snippets/cart-items.liquid`
+   - Other themes: grep for `cart-item` or `line_item` in `snippets/` and `blocks/`
+
+2. **From that file, identify and record:**
+   - The **data attribute on the row wrapper element** (e.g. `data-line-item-key`,
+     `data-cart-item-key`, `data-key`, `data-index`) — this is what `_lockGiftLines()`
+     uses to find the row in the DOM
+   - The **exact element/class of the quantity stepper** (input, custom element, or
+     wrapper div)
+   - The **exact element/class of the remove/delete button**
+
+3. **Use ONLY those confirmed values** — in both `gwp.js._lockGiftLines()` and the
+   `[data-is-gwp='true'] ...` rules in `gwp.css`.
+
+The Analyzer's plan MUST name the cart row file it will read. A plan that skips this
+and lists generic selectors (`.quantity`, `.remove-item`, `.cart-remove-button`) is
+incomplete — the Validator must reject it.
+
+## The reconcile + anti-loop guard (REQUIRED)
 
 ```js
-const meets = subtotalCents >= targetThreshold;   // subtotal EXCLUDING gift lines
-const gift  = findManagedGift(cart);               // variantId + _isGWP
+const meets = subtotalCents >= threshold;   // subtotal EXCLUDING the gift line
+const gift  = findManagedGift(cart);         // variantId + _isGWP
 const has   = !!gift, qty = gift?.quantity ?? 0;
 
-if (meets && !has)              add();
-else if (!meets && has)         remove(gift);
+if (meets && !has)                add();      // qty 1, once
+else if (!meets && has)           remove(gift);
 else if (meets && has && qty!==1) setQty(gift, 1);
 ```
 
-Two guards make it safe:
+Adding/removing the gift changes the cart → fires another event → re-enters this. Two
+guards stop the loop:
 
-1. **Mutation lock** — set a lock before any add/remove/qty call and clear it in a
-   `finally`. While locked, `evaluate()` returns early. Prevents concurrent/overlapping
-   mutations (each of which triggers another cart update).
-2. **State memoization** — cache `{ meets, has, qty, total }` from the last evaluate;
-   if unchanged, return immediately. This is what stops the add→cart-update→evaluate→…
-   loop from repeating once the state has settled.
+1. **Mutation lock** — set before any add/remove/qty call, clear in `finally`; while
+   locked, `evaluate()` returns early.
+2. **State memoization** — cache `{ meets, has, qty, total }`; if unchanged, return.
 
-Also **ignore transient zero totals**: during an async cart refresh `total_price` can
-briefly read `0`; if the last known total was > 0 and < ~400ms elapsed, skip that
-update so the gift isn't wrongly removed and the bar doesn't flash to 0%.
+Also **ignore transient zero totals** (a brief `0` during async refresh when the last
+total was > 0 and < ~400ms ago) so the gift isn't wrongly removed.
 
-## Threshold math — compute on the NON-gift subtotal
+## Threshold math
 
-- Work in **integer cents**.
-- The trigger subtotal must **exclude the gift line** (and any other `_isGWP` lines).
-  If the gift is a real $0 product it contributes 0 anyway; but if it's made free via a
-  Shopify automatic discount, its **catalog price is still in `total_price`** — so
-  summing non-`_isGWP` line prices (`item.final_line_price`) is the safe, correct
-  basis, not raw `cart.total_price` (free-gift-enforcement.md, gotchas.md).
-- Respect the merchant's chosen basis (subtotal vs original/pre-discount) if exposed
-  as a setting.
+Work in **integer cents** against the single threshold, on the **non-gift subtotal**:
+sum non-`_isGWP` line prices (`item.final_line_price`), not raw `cart.total_price` —
+because a discount-backed gift's catalog price is still in `total_price`
+(free-gift-enforcement.md).
 
 ## Acceptance criteria (validator MUST enforce)
 
-- The gift is added with `_isGWP: "true"` (+ `_gwp_tier`) and identified by variant id
-  + `_isGWP`; a manually-added same product is never auto-removed.
-- Add is a single `/cart/add.js` (bundled into the triggering add when applicable);
-  remove is `/cart/change.js` qty 0.
-- A **lock + state memoization** guard is present and transient zeros are ignored —
-  the reconcile provably cannot loop.
-- The trigger threshold is computed on the **non-gift subtotal in cents**.
+- The gift quantity is **always exactly 1**, independent of other line quantities — it
+  never multiplies.
+- Add/remove happen **live via Ajax on every cart change (no refresh)** — on load and
+  after any `/cart/*` mutation.
+- The gift line renders with **no quantity control and no remove button**.
+- Identified by variant id + `_isGWP`; a manual same-product add is untouched.
+- A **lock + memoization** guard is present; the reconcile cannot loop.
+- Threshold computed on the **non-gift subtotal in cents**.
+- Lock selectors in `gwp.js` and `gwp.css` were sourced from the actual cart row
+  template file — the Analyzer plan names that file explicitly.

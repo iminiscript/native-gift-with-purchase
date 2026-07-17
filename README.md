@@ -10,11 +10,11 @@ no-app gift-with-purchase (GWP)** experience for Shopify **Online Store 2.0** th
 
 ## What it does
 
-Automatically adds a configured **free gift** to the cart when the shopper's spend
-crosses a threshold, shows a tiered **progress bar** ("spend $X more for a free Y") in
-the cart drawer/page (plus an optional PDP message), keeps the gift at quantity 1, and
-removes it when the cart drops back below the threshold — **without any third-party
-gift/rewards app**.
+Automatically adds ONE configured **free gift** to the cart when the shopper's spend
+crosses a single threshold, shows a **progress bar** ("spend $X more for your free
+gift") in the cart drawer/page (plus an optional PDP message), keeps the gift at
+quantity 1, and removes it when the cart drops back below the threshold — **without any
+third-party gift/rewards app**. One gift, one threshold — no tiers.
 
 When a task mentions a gift with purchase / free gift / GWP / cart spend-goal bar, the
 plugin's `description` matches, Theme Factory engages it, and its knowledge drives the
@@ -24,8 +24,8 @@ analyzer, dev, and validator agents.
 
 ## How it works
 
-- The gift is a normal cart line marked with the `_isGWP: "true"` (+ `_gwp_tier`)
-  line-item property, added via `/cart/add.js` and removed via `/cart/change.js`.
+- The gift is a normal cart line marked with the `_isGWP: "true"` line-item property,
+  added via `/cart/add.js` and removed via `/cart/change.js`.
 - A **reconcile** runs on every cart change: add if the threshold is met and the gift
   is absent, remove if below, fix quantity to 1 if tampered.
 - An **anti-loop guard** — a mutation **lock** + **state memoization**
@@ -57,7 +57,7 @@ analyzer, dev, and validator agents.
   | `progress-and-config.md` | progress bar, messaging, customizer settings |
   | `free-gift-enforcement.md` | how the gift becomes free ($0 product or automatic discount) |
   | `theme-integration.md` | OS 2.0 blocks, JS wiring, cross-component state, push-valid schema |
-  | `gotchas.md` | the 12 traps |
+  | `gotchas.md` | the 11 traps |
 - **Tools** (`tools.ts`): Shopify Dev MCP for build-time cart/variant lookups.
 - No `storeSettings`, no `sdk` — native build, no external service.
 
@@ -98,5 +98,6 @@ builder (use `native-bundle-builder`). Never edits volatile `templates/*.json`.
 
 ---
 
-*Pattern derived from a production theme's native GWP — the `_isGWP` contract, tiered
-progress bar, and lock + memoization reconcile.*
+*Pattern derived from a production theme's native GWP — the `_isGWP` contract, the
+progress bar, and lock + memoization reconcile. Scoped to a single gift + single
+threshold (no tiers).*
